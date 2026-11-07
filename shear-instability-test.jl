@@ -16,17 +16,25 @@ function parse_commandline()
             arg_type = Float64
             default = 0.01
         "--kx"
-            help = "perturbation wavenumber in x, as a multiple of 2π/Lx"
+            help = "perturbation mode number in x (dimensionless): the wavenumber is kx⋅2π/Lx rad/m, with Lx = 0.1 m"
             arg_type = Int
             default = 2
         "--ky"
-            help = "perturbation wavenumber in y, as a multiple of 2π/Ly (0 means no perturbation)"
+            help = "perturbation mode number in y (dimensionless): the wavenumber is ky⋅2π/Ly rad/m, with Ly = 0.1 m (0 means no perturbation)"
             arg_type = Int
             default = 2
+        "--c"
+            help = "phase speed of the perturbation in +x (m/s)"
+            arg_type = Float64
+            default = 0.5 / (2 * 2π / 0.1) # ≈ 0.00398 m/s, reproduces the earlier runs' sin(2⋅2π/Lx⋅x - 0.5t)
         "--tp"
             help = "perturbation onset time (s)"
             arg_type = Float64
             default = 7.0
+        "--nu"
+            help = "kinematic viscosity (m²/s)"
+            arg_type = Float64
+            default = 1e-6
         "--Nx"
             arg_type = Int
             default = 768
@@ -94,16 +102,26 @@ grid = RectilinearGrid(arch; size=(Nx, Ny, Nz),
 @info "Built grid:\n$grid"
 flush(stderr)
 
-# Surface velocity: U plus a travelling perturbation that ramps up after t = tp.
+# Surface velocity: U plus a perturbation travelling in +x at phase speed c that ramps up after t = tp.
 # max(t - tp, 0) keeps the ramp at zero before tp (and avoids exp overflow for large tp)
-uₛ(x, y, t, p) = p.U + p.A * sin(p.kx*x - p.ω*t) * sin(p.ky*y) * (1 - exp(-max(t - p.tp, 0)))
+uₛ(x, y, t, p) = p.U + p.A * sin(p.kx*(x - p.c*t)) * sin(p.ky*y) * (1 - exp(-max(t - p.tp, 0)))
 
-surface_parameters = (U  = args[:U],
-                      A  = args[:amplitude],
-                      kx = args[:kx] * 2π/Lx,
-                      ky = args[:ky] * 2π/Ly,
-                      ω  = 0.5,
-                      tp = args[:tp])
+surface_parameters = (U  = args[:U],            # m/s
+                      A  = args[:amplitude],    # m/s
+                      kx = args[:kx] * 2π/Lx,   # rad/m
+                      ky = args[:ky] * 2π/Ly,   # rad/m
+                      c  = args[:c],            # m/s
+                      tp = args[:tp])           # s
+
+# Derived quantities, with units in their names. Logged here and saved to the output file under "derived/".
+# period_s is the time for one x wavelength to pass a fixed point, wavelength_x_m / |c|
+derived = (Lx_m = Lx, Ly_m = Ly, Lz_m = Lz,
+           kx_rad_per_m = surface_parameters.kx, ky_rad_per_m = surface_parameters.ky,
+           wavelength_x_m = Lx / args[:kx], wavelength_y_m = Ly / args[:ky],
+           period_s = Lx / args[:kx] / abs(args[:c]))
+
+@info "Derived quantities:\n" * join(["  $k = $v" for (k, v) in pairs(derived)], "\n")
+flush(stderr)
 
 u_bcs = FieldBoundaryConditions(top = ValueBoundaryCondition(uₛ, parameters=surface_parameters), bottom = ValueBoundaryCondition(0))
 boundary_conditions = (u = u_bcs,);
@@ -111,7 +129,7 @@ boundary_conditions = (u = u_bcs,);
 model = NonhydrostaticModel(grid;
                             boundary_conditions,
                             advection = UpwindBiased(order=5),
-                            closure = ScalarDiffusivity(ν=1e-6))
+                            closure = ScalarDiffusivity(ν=args[:nu]))
 
 @info "Built model"
 flush(stderr)
@@ -136,7 +154,8 @@ tcfl = cfl_safety*grid.Δxᶠᵃᵃ/sₘ          # [physics].cfl_safety
 
 simulation = Simulation(model, Δt=tcfl, stop_time=args[:stop_time])
 
-conjure_time_step_wizard!(simulation, IterationInterval(10), cfl=0.7, max_change=1.1, max_Δt=0.5)
+# keep at least 20 time steps per perturbation period (period_s is Inf when c = 0)
+conjure_time_step_wizard!(simulation, IterationInterval(10), cfl=0.7, max_change=1.1, max_Δt=min(0.5, derived.period_s/20))
 
 
 
@@ -171,10 +190,13 @@ else
     filename = args[:output] * ".jld2"
 end
 
-# Store the run parameters in the output file, under "parameters/"
+# Store the command line arguments under "parameters/" and the derived quantities under "derived/"
 function save_parameters(file, model)
     for (k, v) in args
         file["parameters/$k"] = v
+    end
+    for (k, v) in pairs(derived)
+        file["derived/$k"] = v
     end
 end
 
