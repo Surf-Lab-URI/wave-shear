@@ -1,0 +1,5 @@
+*.mp4
+*.out
+.vscode/
+sh/
+*.jld2
