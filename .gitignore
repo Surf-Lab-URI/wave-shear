@@ -3,3 +3,4 @@
 .vscode/
 sh/
 *.jld2
+runs/

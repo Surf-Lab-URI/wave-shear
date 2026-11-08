@@ -11,14 +11,15 @@ slices = jldopen(file -> haskey(file, "timeseries/u_top"), filename)
 @info "Reading $(slices ? "face slices" : "full fields") from $filename"
 flush(stderr)
 
-# Load u on the top (z = z[end]), east (x = x[end]) and north (y = y[end]) faces, as
-#   u_top[i, j, n]   at (x[i], y[j], z_top)
-#   u_east[j, k, n]  at (x_east, y[j], z[k])
-#   u_north[i, k, n] at (x[i], y_north, z[k])
+# u on the top (z = z[end]), east (x = x[end]) and north (y = y[end]) faces at snapshot n:
+#   u_top(n)[i, j]   at (x[i], y[j], z_top)
+#   u_east(n)[j, k]  at (x_east, y[j], z[k])
+#   u_north(n)[i, k] at (x[i], y_north, z[k])
 if slices
-    top_timeseries   = FieldTimeSeries(filename, "u_top")
-    east_timeseries  = FieldTimeSeries(filename, "u_east")
-    north_timeseries = FieldTimeSeries(filename, "u_north")
+    # Read one snapshot at a time, so long runs don't need to fit in memory
+    top_timeseries   = FieldTimeSeries(filename, "u_top", backend = OnDisk())
+    east_timeseries  = FieldTimeSeries(filename, "u_east", backend = OnDisk())
+    north_timeseries = FieldTimeSeries(filename, "u_north", backend = OnDisk())
 
     @info "set up FieldTimeSeries"
     flush(stderr)
@@ -32,9 +33,9 @@ if slices
     _, y_north, _ = nodes(north_timeseries[1])
     z_top, x_east, y_north = only(z_top), only(x_east), only(y_north)
 
-    u_top   = interior(top_timeseries)[:, :, 1, :]
-    u_east  = interior(east_timeseries)[1, :, :, :]
-    u_north = interior(north_timeseries)[:, 1, :, :]
+    u_top   = n -> interior(top_timeseries[n])[:, :, 1]
+    u_east  = n -> interior(east_timeseries[n])[1, :, :]
+    u_north = n -> interior(north_timeseries[n])[:, 1, :]
 else
     u_timeseries = FieldTimeSeries(filename, "u", backend = OnDisk())
 
@@ -48,21 +49,25 @@ else
 
     Nt = length(times)
 
-    u_top   = zeros(length(x), length(y), Nt)
-    u_east  = zeros(length(y), length(z), Nt)
-    u_north = zeros(length(x), length(z), Nt)
+    top_faces   = zeros(length(x), length(y), Nt)
+    east_faces  = zeros(length(y), length(z), Nt)
+    north_faces = zeros(length(x), length(z), Nt)
 
     @info "Loading data for plot ..."
     flush(stderr)
     for n in 1:Nt
         uₙ = interior(u_timeseries[n])           # reads one snapshot
-        u_top[:, :, n]   .= uₙ[:, :, end]
-        u_east[:, :, n]  .= uₙ[end, :, :]
-        u_north[:, :, n] .= uₙ[:, end, :]
+        top_faces[:, :, n]   .= uₙ[:, :, end]
+        east_faces[:, :, n]  .= uₙ[end, :, :]
+        north_faces[:, :, n] .= uₙ[:, end, :]
         GC.gc()
         @info "frame $n"
         flush(stderr)
     end
+
+    u_top   = n -> top_faces[:, :, n]
+    u_east  = n -> east_faces[:, :, n]
+    u_north = n -> north_faces[:, :, n]
 end
 
 @info "Loaded $(length(times)) snapshots from t = $(first(times)) to $(last(times))"
@@ -98,9 +103,9 @@ fig = Figure(size = (800, 500))
 ax = Axis3(fig[1,1]; aspect = :data, azimuth = 0.5, elevation = 0.45)
 
 kw = (colormap = :speed, colorrange = (0,0.15), shading = NoShading)
-surface!(ax, x_east_face, y_east_face, z_east_face; color = @lift(u_east[:, :, $n]), kw...)
-surface!(ax, x_north_face, y_north_face, z_north_face; color = @lift(u_north[:, :, $n]), kw...)
-surface!(ax, x, y, z_top_face; color = @lift(u_top[:, :, $n]), kw...)
+surface!(ax, x_east_face, y_east_face, z_east_face; color = @lift(u_east($n)), kw...)
+surface!(ax, x_north_face, y_north_face, z_north_face; color = @lift(u_north($n)), kw...)
+surface!(ax, x, y, z_top_face; color = @lift(u_top($n)), kw...)
 
 fig
 

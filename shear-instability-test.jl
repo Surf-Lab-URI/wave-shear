@@ -52,14 +52,15 @@ function parse_commandline()
             help = "time between saved snapshots (s)"
             arg_type = Float64
             default = 0.06
+        "--snapshots-per-period"
+            help = "if > 0, save this many snapshots per perturbation period instead of using --output-interval"
+            arg_type = Int
+            default = 0
         "--output"
             help = "output file prefix: writes <output>.jld2, or <output>_slices.jld2 with --slices-only"
             default = "shear-instability-test-p1"
         "--slices-only"
             help = "only save u on the top, east and north faces (the faces the plotting script uses)"
-            action = :store_true
-        "--cpu"
-            help = "run on the CPU instead of the GPU (for small tests)"
             action = :store_true
     end
 
@@ -70,6 +71,11 @@ const args = parse_commandline()
 
 @info "Parameters:\n" * join(["  $k = $v" for (k, v) in sort(collect(args), by=first)], "\n")
 flush(stderr)
+
+# Loading CUDA on a node without a GPU can precompile CUDA.jl's libraries without GPU support,
+# which then breaks later runs on GPU nodes, so stop before that can happen
+has_gpu = try success(pipeline(`nvidia-smi -L`, devnull)) catch; false end
+has_gpu || error("No GPU found. Run this script on a GPU node, e.g. through Slurm with --gpus=1")
 
 using Oceananigans, CUDA
 using Random
@@ -91,9 +97,7 @@ h(k) = (k - 1) / Nz
 ζ₀(k) = 1 + (h(k) - 1) / refinement
 Σ(k) = (1 - exp(-stretching * h(k))) / (1 - exp(-stretching))
 
-arch = args[:cpu] ? CPU() : GPU()
-
-grid = RectilinearGrid(arch; size=(Nx, Ny, Nz),
+grid = RectilinearGrid(GPU(); size=(Nx, Ny, Nz),
                                 x = (0, Lx),
                                 y = (0, Ly),
                                 z = k -> Lz * (ζ₀(k) * Σ(k) - 1),
@@ -115,12 +119,24 @@ surface_parameters = (U  = args[:U],            # m/s
 
 # Derived quantities, with units in their names. Logged here and saved to the output file under "derived/".
 # period_s is the time for one x wavelength to pass a fixed point, wavelength_x_m / |c|
+period_s = Lx / args[:kx] / abs(args[:c])
+output_interval_s = args[:snapshots_per_period] > 0 ? period_s / args[:snapshots_per_period] : args[:output_interval]
+
 derived = (Lx_m = Lx, Ly_m = Ly, Lz_m = Lz,
            kx_rad_per_m = surface_parameters.kx, ky_rad_per_m = surface_parameters.ky,
            wavelength_x_m = Lx / args[:kx], wavelength_y_m = Ly / args[:ky],
-           period_s = Lx / args[:kx] / abs(args[:c]))
+           period_s, output_interval_s)
 
 @info "Derived quantities:\n" * join(["  $k = $v" for (k, v) in pairs(derived)], "\n")
+flush(stderr)
+
+# The commit this run used, saved to the output file under "code/". git_dirty = true means the
+# script had uncommitted changes, so the commit alone doesn't reproduce the run
+git(cmd...) = try readchomp(`git -C $(@__DIR__) $cmd`) catch; "unknown" end
+code = (git_commit = git("rev-parse", "HEAD"),
+        git_dirty  = !isempty(git("status", "--porcelain", "--untracked-files=no")))
+
+@info "Code: commit $(code.git_commit)" * (code.git_dirty ? " with uncommitted changes" : "")
 flush(stderr)
 
 u_bcs = FieldBoundaryConditions(top = ValueBoundaryCondition(uₛ, parameters=surface_parameters), bottom = ValueBoundaryCondition(0))
@@ -190,7 +206,8 @@ else
     filename = args[:output] * ".jld2"
 end
 
-# Store the command line arguments under "parameters/" and the derived quantities under "derived/"
+# Store the command line arguments under "parameters/", the derived quantities under "derived/"
+# and the git commit under "code/"
 function save_parameters(file, model)
     for (k, v) in args
         file["parameters/$k"] = v
@@ -198,14 +215,17 @@ function save_parameters(file, model)
     for (k, v) in pairs(derived)
         file["derived/$k"] = v
     end
+    for (k, v) in pairs(code)
+        file["code/$k"] = v
+    end
 end
 
 simulation.output_writers[:fields] = JLD2Writer(model, outputs; filename,
-                                                schedule = TimeInterval(args[:output_interval]),
+                                                schedule = TimeInterval(output_interval_s),
                                                 init = save_parameters,
                                                 overwrite_files = true)
 
-@info "Saving $(join(keys(outputs), ", ")) every $(args[:output_interval]) s to $(abspath(filename))"
+@info "Saving $(join(keys(outputs), ", ")) every $output_interval_s s to $(abspath(filename))"
 flush(stderr)
 
 
