@@ -1,5 +1,5 @@
 using Pkg; Pkg.activate(@__DIR__)
-using Oceananigans, CairoMakie, JLD2
+using Oceananigans, CairoMakie, JLD2, Printf
 
 # Usage: julia shear-instability-test-plotting.jl [output.jld2] [movie.mp4]
 # Works with either full-field output (<output>.jld2) or --slices-only output (<output>_slices.jld2)
@@ -100,12 +100,18 @@ n = Observable(1)
 # set up 3D Axes. The camera sits at (cos(elevation)cos(azimuth), cos(elevation)sin(azimuth), sin(elevation)),
 # i.e. on the +x, +y, +z side for these angles, so the east, north and top faces are the ones in view
 fig = Figure(size = (800, 500))
-ax = Axis3(fig[1,1]; aspect = :data, azimuth = 0.5, elevation = 0.45)
+ax = Axis3(fig[1,1]; aspect = :data, azimuth = 0.5, elevation = 0.45,
+           xlabel = "x (m)", ylabel = "y (m)", zlabel = "z (m)",
+           zlabeloffset = 75, protrusions = (90, 30, 30, 30), # room for the z label clear of its tick labels
+           title = @lift(@sprintf("t = %.3f s", times[$n])))
 
-kw = (colormap = :speed, colorrange = (0,0.15), shading = NoShading)
+# Same colour range for every run so movies can be compared; covers U + amplitude up to 0.2 m/s
+kw = (colormap = :speed, colorrange = (0, 0.2), shading = NoShading)
 surface!(ax, x_east_face, y_east_face, z_east_face; color = @lift(u_east($n)), kw...)
 surface!(ax, x_north_face, y_north_face, z_north_face; color = @lift(u_north($n)), kw...)
-surface!(ax, x, y, z_top_face; color = @lift(u_top($n)), kw...)
+top = surface!(ax, x, y, z_top_face; color = @lift(u_top($n)), kw...)
+
+Colorbar(fig[1,2], top; label = "u (m/s)")
 
 fig
 
