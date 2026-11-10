@@ -3,4 +3,10 @@
 .vscode/
 sh/
 *.jld2
+
+# sweep runs: output, logs, movies and runs/summary.csv
 runs/
+
+# macOS
+.DS_Store
+._*
