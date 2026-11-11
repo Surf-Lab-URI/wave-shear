@@ -133,10 +133,11 @@ flush(stderr)
 # The commit this run used, saved to the output file under "code/". git_dirty = true means the
 # script had uncommitted changes, so the commit alone doesn't reproduce the run
 git(cmd...) = try readchomp(`git -C $(@__DIR__) $cmd`) catch; "unknown" end
-code = (git_commit = git("rev-parse", "HEAD"),
+code = (script     = basename(@__FILE__),
+        git_commit = git("rev-parse", "HEAD"),
         git_dirty  = !isempty(git("status", "--porcelain", "--untracked-files=no")))
 
-@info "Code: commit $(code.git_commit)" * (code.git_dirty ? " with uncommitted changes" : "")
+@info "Code: $(code.script) at commit $(code.git_commit)" * (code.git_dirty ? " with uncommitted changes" : "")
 flush(stderr)
 
 u_bcs = FieldBoundaryConditions(top = ValueBoundaryCondition(uₛ, parameters=surface_parameters), bottom = ValueBoundaryCondition(0))

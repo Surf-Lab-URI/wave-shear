@@ -1,0 +1,4 @@
+name,script,U,amplitude,kx_min,kx_max,ky_max,U_doppler,seed,tp,stop_time,snapshots_per_period
+U0.15_A0.01_seed1,shear-instability-wavefield.jl,0.15,0.01,0,5,1,0.1,1,7,30,8
+U0.15_A0.02_seed1,shear-instability-wavefield.jl,0.15,0.02,0,5,1,0.1,1,7,30,8
+U0.15_A0.04_seed1,shear-instability-wavefield.jl,0.15,0.04,0,5,1,0.1,1,7,30,8

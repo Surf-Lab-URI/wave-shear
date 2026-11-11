@@ -10,7 +10,8 @@
 #SBATCH -t 2-00:00:00
 
 # Runs one row of a sweep table, chosen by the array index. Submit with sweeps/submit.sh rather than directly.
-# Each column of the table (other than name) becomes a command-line option, e.g. stop_time -> --stop-time.
+# The script column picks the simulation (default shear-instability-test.jl). Every other column except name
+# becomes a command-line option of that script, e.g. stop_time -> --stop-time.
 set -euo pipefail
 
 table=$1
@@ -33,15 +34,19 @@ fi
 mkdir -p "$rundir"
 cd "$rundir"
 
+script=shear-instability-test.jl
 options=()
 for i in "${!keys[@]}"; do
-    [[ ${keys[i]} == name ]] && continue
-    options+=("--${keys[i]//_/-}" "${values[i]}")
+    case ${keys[i]} in
+        name) ;;
+        script) script=${values[i]} ;;
+        *) options+=("--${keys[i]//_/-}" "${values[i]}") ;;
+    esac
 done
 
-echo "Run $name, job ${SLURM_ARRAY_JOB_ID}_${SLURM_ARRAY_TASK_ID} on $(hostname)"
+echo "Run $name with $script, job ${SLURM_ARRAY_JOB_ID}_${SLURM_ARRAY_TASK_ID} on $(hostname)"
 nvidia-smi -L
 
-julia "$repo/shear-instability-test.jl" "${options[@]}" --slices-only --output "$name" 2>&1 | tee simulation.log
+julia "$repo/$script" "${options[@]}" --slices-only --output "$name" 2>&1 | tee simulation.log
 
 touch done

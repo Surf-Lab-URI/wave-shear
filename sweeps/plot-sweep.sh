@@ -8,7 +8,7 @@
 #SBATCH --no-requeue
 #SBATCH -t 1-00:00:00
 
-# Makes the 3D movie for one row of a sweep table, chosen by the array index, as runs/<name>/<name>_3D.mp4.
+# Makes the 3D movie for one row of a sweep table, chosen by the array index, as runs/<sweep>/<name>/<name>_3D.mp4.
 # Submit with sweeps/submit.sh --plot rather than directly.
 set -euo pipefail
 
